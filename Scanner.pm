@@ -703,7 +703,7 @@ sub fullRescan {
 	push @moduleKeys,@$array;
 	for my $key (@moduleKeys) {
 		my $module = $modules->{$key};
-		if($module->{'enabled'} && $module->{'active'}) {
+		if($module->{'enabled'} && $module->{'active'} && (!defined($module->{'licensed'}) || $module->{'licensed'})) {
 			$scanningModulesInProgress{$key}=1;
 			Slim::Control::Request::notifyFromArray(undef, ['customscan', 'changedstatus', $key, 1]);
 		}
@@ -716,7 +716,7 @@ sub fullRescan {
 
 	for my $key (@moduleKeys) {
 		my $module = $modules->{$key};
-		if($module->{'enabled'} && $module->{'active'} && defined($module->{'scanInit'})) {
+		if($module->{'enabled'} && $module->{'active'} && (!defined($module->{'licensed'}) || $module->{'licensed'}) && defined($module->{'scanInit'})) {
 			no strict 'refs';
 			$log->debug("Calling: scanInit on $key\n");
 			eval { &{$module->{'scanInit'}}(); };
@@ -743,7 +743,7 @@ sub moduleRescan {
 		$modules = getPluginModules();
 	}
 	my $module = $modules->{$moduleKey};
-	if(defined($module) && defined($module->{'id'}) && $module->{'active'}) {
+	if(defined($module) && defined($module->{'id'}) && $module->{'active'} && (!defined($module->{'licensed'} || $module->{'licensed'}))) {
 		$scanningModulesInProgress{$moduleKey} = 1;
 		Slim::Control::Request::notifyFromArray(undef, ['customscan', 'changedstatus', $moduleKey, 1]);
 		if(!defined($module->{'requiresRefresh'}) || $module->{'requiresRefresh'}) {
@@ -1042,6 +1042,7 @@ sub exitScan {
 			$dbh->do("ANALYZE table customscan_contributor_attributes");
 		}
 	}
+	commit($dbh);
 	if(!isScanning(undef)) {
 		$scanningAborted = 0;
 	}
@@ -1105,15 +1106,15 @@ sub initArtistScan {
 	if($needToScanArtists) {
 		my @joins = ();
 		push @joins, 'contributorTracks';
-		my $artists = Slim::Schema->resultset('Contributor')->search(
+		$scanningContext->{'noOfArtists'} = Slim::Schema->resultset('Contributor')->search(
 			{'contributorTracks.role' => {'in' => [1,5]}},
 			{
 				'group_by' => 'me.id',
 				'join' => \@joins
 			}
-		);
-		$scanningContext->{'artists'} = $artists;
-		$log->info("Got ".$artists->count." artists\n");
+		)->count;
+		$scanningContext->{'currentArtistNo'} = 0;
+		$log->info("Got ".$scanningContext->{'noOfArtists'}." artists");
 	}
 	my %context = ();
 	Slim::Utils::Scheduler::add_task(\&initScanArtist,$moduleKey,\@moduleKeys,\%context,$scanningContext);
@@ -1157,7 +1158,7 @@ sub initScanArtist {
 sub getSortedModuleKeys {
 	my @moduleArray = ();
 	for my $key (keys %$modules) {
-		if($modules->{$key}->{'enabled'} && $modules->{$key}->{'active'}) {
+		if($modules->{$key}->{'enabled'} && $modules->{$key}->{'active'} && (!defined($modules->{$key}->{'licensed'}) || $modules->{$key}->{'licensed'})) {
 			my %tmp = (
 				'key' => $key,
 				'module' => $modules
@@ -1258,9 +1259,9 @@ sub initAlbumScan {
 		}
 	}
 	if($needToScanAlbums) {
-		my $albums = Slim::Schema->resultset('Album');
-		$scanningContext->{'albums'} = $albums;
-		$log->info("Got ".$albums->count." albums\n");
+		$scanningContext->{'noOfAlbums'} = Slim::Schema->resultset('Album')->count;
+		$scanningContext->{'currentAlbumNo'} = 0;
+		$log->info("Got ".$scanningContext->{'noOfAlbums'}." albums");
 	}
 	my %context = ();
 	Slim::Utils::Scheduler::add_task(\&initScanAlbum,$moduleKey,\@moduleKeys,\%context,$scanningContext);
@@ -1408,9 +1409,9 @@ sub initTrackScan {
 		}
 	}
 	if($needToScanTracks) {
-		my $tracks = Slim::Schema->resultset('Track');
-		$scanningContext->{'tracks'} = $tracks;
-		$log->info("Got ".$tracks->count." tracks\n");
+		$scanningContext->{'noOfTracks'} = Slim::Schema->resultset('Track')->count;
+		$scanningContext->{'currentTrackNo'} = 0;
+		$log->info("Got ".$scanningContext->{'noOfTracks'}." tracks");
 	}
 	my %context = ();
 	Slim::Utils::Scheduler::add_task(\&initScanTrack,$moduleKey,\@moduleKeys,\%context,$scanningContext);
@@ -1459,11 +1460,27 @@ sub scanArtist {
 	my $scanningContext = shift;
 
 	my $artist = undef;
-	if(defined($scanningContext->{'artists'})) {
-		$artist = $scanningContext->{'artists'}->next;
+	if(defined($scanningContext->{'currentArtistNo'})) {
+		my @joins = ();
+		push @joins, 'contributorTracks';
+		$artist = Slim::Schema->resultset('Contributor')->search(
+			{'contributorTracks.role' => {'in' => [1,5]}},
+			{
+				'group_by' => 'me.id',
+				'join' => \@joins
+			}
+		)->slice($scanningContext->{'currentArtistNo'},$scanningContext->{'currentArtistNo'})->single;
+		$scanningContext->{'currentArtistNo'}++;
 		if(defined($artist) && $artist->id eq Slim::Schema->variousArtistsObject->id) {
 			$log->debug("CustomScan: Skipping artist ".$artist->name."\n");
-			$artist = $scanningContext->{'artists'}->next;
+			$artist = Slim::Schema->resultset('Contributor')->search(
+				{'contributorTracks.role' => {'in' => [1,5]}},
+				{
+					'group_by' => 'me.id',
+					'join' => \@joins
+				}
+			)->slice($scanningContext->{'currentArtistNo'},$scanningContext->{'currentArtistNo'})->single;
+			$scanningContext->{'currentArtistNo'}++;
 		}
 	}
 	my @moduleKeys = ();
@@ -1475,7 +1492,8 @@ sub scanArtist {
 	}
 	if(defined($artist)) {
 		my $dbh = getCurrentDBH();
-		$log->debug("Scanning artist: ".$artist->name."\n");
+		$log->debug("Scanning artist ".$scanningContext->{'currentArtistNo'}." of ".$scanningContext->{'noOfArtists'});
+		$log->debug("Scanning artist: ".$artist->name);
 		for my $key (@moduleKeys) {
 			my $module = $modules->{$key};
 			my $moduleId = $module->{'id'};
@@ -1589,15 +1607,17 @@ sub scanAlbum {
 	my $scanningContext = shift;
 
 	my $album = undef;
-	if($scanningContext->{'albums'}) {
-		$album = $scanningContext->{'albums'}->next;
+	if(defined($scanningContext->{'currentAlbumNo'})) {
+		$album = Slim::Schema->resultset('Album')->slice($scanningContext->{'currentAlbumNo'},$scanningContext->{'currentAlbumNo'})->single;
+		$scanningContext->{'currentAlbumNo'}++;
 		while(defined($album) && (!$album->title || $album->title eq string('NO_ALBUM'))) {
 			if($album->title) {
 				$log->debug("CustomScan: Skipping album ".$album->title."\n");
 			}else {
 				$log->debug("CustomScan: Skipping album with no title\n");
 			}
-			$album = $scanningContext->{'albums'}->next;
+			$album = Slim::Schema->resultset('Album')->slice($scanningContext->{'currentAlbumNo'},$scanningContext->{'currentAlbumNo'})->single;
+			$scanningContext->{'currentAlbumNo'}++;
 		}
 	}
 	my @moduleKeys = ();
@@ -1609,7 +1629,8 @@ sub scanAlbum {
 	}
 	if(defined($album)) {
 		my $dbh = getCurrentDBH();
-		$log->debug("Scanning album: ".$album->title."\n");
+		$log->debug("Scanning albums ".$scanningContext->{'currentAlbumNo'}." of ".$scanningContext->{'noOfAlbums'});
+		$log->debug("Scanning album: ".$album->title);
 		for my $key (@moduleKeys) {
 			my $module = $modules->{$key};
 			my $moduleId = $module->{'id'};
@@ -1722,12 +1743,14 @@ sub scanTrack {
 	my $scanningContext = shift;
 
 	my $track = undef;
-	if(defined($scanningContext->{'tracks'})) {
-		$track = $scanningContext->{'tracks'}->next;
+	if(defined($scanningContext->{'currentTrackNo'})) {
+		$track = Slim::Schema->resultset('Track')->slice($scanningContext->{'currentTrackNo'},$scanningContext->{'currentTrackNo'})->single;
+		$scanningContext->{'currentTrackNo'}++;
 		my $maxCharacters = ($useLongUrls?511:255);
 		# Skip non audio tracks and tracks with url longer than max number of characters
 		while(defined($track) && (!$track->audio || ($driver eq 'mysql' && length($track->url)>$maxCharacters))) {
-			$track = $scanningContext->{'tracks'}->next;
+			$track = Slim::Schema->resultset('Track')->slice($scanningContext->{'currentTrackNo'},$scanningContext->{'currentTrackNo'})->single;
+			$scanningContext->{'currentTrackNo'}++;
 		}
 	}
 	my @moduleKeys = ();
@@ -1739,7 +1762,8 @@ sub scanTrack {
 	}
 	if(defined($track)) {
 		my $dbh = getCurrentDBH();
-		$log->debug("Scanning track: ".$track->title."\n");
+		$log->debug("Scanning track ".$scanningContext->{'currentTrackNo'}." of ".$scanningContext->{'noOfTracks'});
+		$log->debug("Scanning track: ".$track->title);
 		for my $key (@moduleKeys) {
 			my $module = $modules->{$key};
 			my $moduleId = $module->{'id'};
@@ -1866,7 +1890,7 @@ sub refreshData
 	}
 	for my $moduleKey (keys %$modules) {
 		my $module = $modules->{$moduleKey};
-		if(defined($module) && defined($module->{'id'}) && $module->{'active'}) {
+		if(defined($module) && defined($module->{'id'}) && $module->{'active'} && (!defined($module->{'licensed'}) || $module->{'licensed'})) {
 			if(!defined($module->{'requiresRefresh'}) || $module->{'requiresRefresh'}) {
 				$log->info("Refresh triggered by module: ".$module->{'name'});				
 				$performRefresh=1;
@@ -2216,6 +2240,19 @@ sub refreshData
 	$sth->finish();
 	$log->info("Finished updating custom scan track data based on urls, updated $count items : It took ".$timeMeasure->getElapsedTime()." seconds\n");
 	main::idleStreams();
+	if($driver eq 'SQLite') {
+		$timeMeasure->stop();
+		$timeMeasure->clear();
+
+		$timeMeasure->start();
+		$log->info("Start optimizing SQLite database");
+		my $dbh = getCurrentDBH();
+		$dbh->do("ANALYZE customscan_track_attributes");
+		$dbh->do("ANALYZE customscan_album_attributes");
+		$dbh->do("ANALYZE customscan_contributor_attributes");
+		commit($dbh);
+		$log->info("Finished optimizing SQLite database : It took ".$timeMeasure->getElapsedTime()." seconds");
+	}
 	$log->warn("CustomScan: Synchronization finished\n");
 	$timeMeasure->stop();
 	$timeMeasure->clear();

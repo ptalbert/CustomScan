@@ -133,3 +133,11 @@ SETUP_PLUGIN_CUSTOMSCAN_SCANNING_DESC
 SETUP_PLUGIN_CUSTOMSCAN_DEVELOPEDBY
 	EN	Developed by
 
+PLUGIN_CUSTOMSCAN_CUSTOMTAG
+	EN	Custom Scan Custom Tag
+
+PLUGIN_CUSTOMSCAN_REFRESH_DATABASE
+	EN	Refresh/Optimize database
+
+PLUGIN_CUSTOMSCAN_REFRESH_DATABASE_WARNING
+	EN	This can sometime take some time in large libraries, do you want to continue ?

@@ -48,6 +48,7 @@ sub getCustomScanFunctions {
 		'developedBy' => 'Erland Isaksson',
 		'developedByLink' => 'http://erland.isaksson.info/donate',
 		'alwaysRescanTrack' => 1,
+		'requiresRefresh' => 0,
 		'exitScanTrack' => \&exitScanTrack,
 		'properties' => [
 			{
@@ -538,6 +539,8 @@ sub getMixedTagMenuItems {
 	}
 	if(defined($currentItem->{'value'})) {
 		$trackssql .= "join customscan_track_attributes on tracks.id=customscan_track_attributes.track and customscan_track_attributes.module='mixedtag' and customscan_track_attributes.attr='".quoteValue($currentItem->{'tag'})."' and customscan_track_attributes.extravalue='".quoteValue($currentItem->{'value'})."' ";
+	}elsif(defined($currentItem->{'id'})) {
+		$trackssql .= "join customscan_track_attributes on tracks.id=customscan_track_attributes.track and customscan_track_attributes.module='mixedtag' and customscan_track_attributes.attr='".quoteValue($currentItem->{'tag'})."' and customscan_track_attributes.extravalue='{level".$currentLevel."_".quoteValue($currentItem->{'tag'})."}' ";
 	}
 	if(defined($parameters->{'activelibrary'}) && $parameters->{'activelibrary'}) {
 		$trackssql .= " join multilibrary_track on tracks.id=multilibrary_track.track and multilibrary_track.library=\{clientproperty.plugin_multilibrary_activelibraryno\} ";		
@@ -555,16 +558,16 @@ sub getMixedTagMenuItems {
 			if(defined($parameters->{'roles'}) && $parameters->{'roles'}) {
 				$roles = $parameters->{'roles'};
 			}
-			$albumssqlbyartists = "select albums.id,ifnull(if(albums.compilation,' ',concat('(', group_concat(distinct contributors.name separator ',') ,')')),' '),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
+			$albumssqlbyartists = "select albums.id,ifnull(if(albums.compilation,' ',concat('(', group_concat(distinct contributors.name) ,')')),' '),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
 			$albumssqlbyartists .= "left join contributor_track on contributor_track.track=tracks.id and contributor_track.role in ($roles) ";
 			$albumssqlbyartists .= "left join contributors on contributor_track.contributor=contributors.id ";
 
-			if(defined($parameters->{'showartistwithalbum'}) && $parameters->{'showartistwithalbum'} && $driver eq 'mysql') {
-				$albumssql = "select albums.id,ifnull(if(albums.compilation,' ',concat('(', group_concat(distinct contributors.name separator ',') ,')')),' '),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
+			if(defined($parameters->{'showartistwithalbum'}) && $parameters->{'showartistwithalbum'}) {
+				$albumssql = "select albums.id,ifnull(if(albums.compilation,' ',concat('(', group_concat(distinct contributors.name) ,')')),' '),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
 				$albumssql .= "left join contributor_track on contributor_track.track=tracks.id and contributor_track.role in ($roles) ";
 				$albumssql .= "left join contributors on contributor_track.contributor=contributors.id ";
 
-				$albumssqlbyyear = "select albums.id,if(albums.compilation,if(albums.year=0,' ',concat('(',albums.year,')')),concat(if(albums.year=0,'(',concat('(',albums.year,' ')), ifnull(group_concat(distinct contributors.name separator ','),'') ,')')),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
+				$albumssqlbyyear = "select albums.id,if(albums.compilation,if(albums.year=0,' ',concat('(',albums.year,')')),concat(if(albums.year=0,'(',concat('(',albums.year,' ')), ifnull(group_concat(distinct contributors.name),'') ,')')),substr(albums.titlesort,1,1),'album' from albums join tracks on tracks.album=albums.id ";
 				$albumssqlbyyear .= "left join contributor_track on contributor_track.track=tracks.id and contributor_track.role in ($roles) ";
 				$albumssqlbyyear .= "left join contributors on contributor_track.contributor=contributors.id ";
 			}else {
@@ -597,7 +600,7 @@ sub getMixedTagMenuItems {
 
 		if(defined($parameters->{'findcustomtag'}) && $parameters->{'findcustomtag'} ne '') {
 			# Create All customtag SQL
-			$customtagsql = "select customscan_track_attributes.extravalue,customscan_track_attributes.value,substr(customscan_track_attributes.valuesort,1,1),ifnull(customscan_track_attributes.valuetype,'mixedtag".$parameters->{'findcustomtag'}."'),customscan_track_attributes.valuetype from customscan_track_attributes join tracks on tracks.id=customscan_track_attributes.track and module='mixedtag' and attr='".quoteValue($parameters->{'findcustomtag'})."' ";
+			$customtagsql = "select customscan_track_attributes.extravalue,customscan_track_attributes.value,substr(customscan_track_attributes.valuesort,1,1),ifnull(customscan_track_attributes.valuetype,'mixedtag".$parameters->{'findcustomtag'}."'),customscan_track_attributes.valuetype from customscan_track_attributes join tracks on tracks.id=customscan_track_attributes.track and customscan_track_attributes.module='mixedtag' and customscan_track_attributes.attr='".quoteValue($parameters->{'findcustomtag'})."' ";
 			for my $it (@items) {
 				if(defined($it->{'value'})) {
 					my $attr = "attr".$it->{'id'};
@@ -823,7 +826,7 @@ sub getMixedTagMenuItems {
 			'menudata' => $albumssql,
 			'menu' => \%menutracks
 		);
-		if(defined($parameters->{'showartistwithalbum'}) && $parameters->{'showartistwithalbum'} && $driver eq 'mysql') {
+		if(defined($parameters->{'showartistwithalbum'}) && $parameters->{'showartistwithalbum'}) {
 			$menualbums{'itemformat'} = 'albumconcat';
 		}
 		if(defined($parameters->{'defaultalbumsort'}) && $parameters->{'defaultalbumsort'}) {
@@ -851,9 +854,7 @@ sub getMixedTagMenuItems {
 		my @options = ();
 		push @options, \%menualbumsbytitle;
 		push @options, \%menualbumsbyyear;
-		if($driver eq 'mysql') {
-			push @options, \%menualbumsbyartists;
-		}
+		push @options, \%menualbumsbyartists;
 		$menualbums{'option'} = \@options;
 
 		my %allalbums = (
@@ -958,6 +959,7 @@ sub getMixedTagMenuItems {
 			'playtypeall' => 'none',
 			'playtype' => 'sql',
 			'playdata' => $trackssql,
+			'ipengitemtype' => 'playlist',
 			'menu' => \%menutracks
 		);
 		if(defined($parameters->{'showtracksafterlevel'}) && $parameters->{'showtracksafterlevel'} ne '' && $parameters->{'showtracksafterlevel'}<=$currentLevel) {

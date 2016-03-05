@@ -170,6 +170,7 @@ sub commandCallback($)
 		}elsif($prefs->get("refresh_rescan")) {
 			Plugins::CustomScan::Scanner::refreshData();
 		}
+		Plugins::CustomScan::Scanner::createSQLiteFunctions();
 
 	}
 	$log->debug("Exiting commandCallback\n");
@@ -212,15 +213,18 @@ sub getPluginModules {
 
 sub getMultiLibraryTemplates {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/MultiLibrary','LibraryTemplates','xml');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/MultiLibrary','LibraryTemplates','xml');
 }
 sub getSQLPlayListTemplates {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/SQLPlayList','PlaylistTemplates','xml');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/SQLPlayList','PlaylistTemplates','xml');
 }
 sub getSQLPlayListPlaylists {
 	my $client = shift;
-	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/SQLPlayList','Playlists','xml','template','playlist','simple',1);
+	my $pluginVersion = shift;
+	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/SQLPlayList','Playlists','xml','template','playlist','simple',1);
 	my @filteredResult = ();
 	my $dbh = getCurrentDBH();
 	for my $playlist (@$result) {
@@ -333,7 +337,8 @@ sub handleWebNewSQLPlayList {
 
 sub getDatabaseQueryDataQueries {
 	my $client = shift;
-	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/DatabaseQuery','DataQueries','xml','template','dataquery','simple',1);
+	my $pluginVersion = shift;
+	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/DatabaseQuery','DataQueries','xml','template','dataquery','simple',1);
 	my @filteredResult = ();
 	my $dbh = getCurrentDBH();
 	for my $query (@$result) {
@@ -369,12 +374,14 @@ sub getDatabaseQueryDataQueries {
 }
 sub getDatabaseQueryTemplates {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/DatabaseQuery','DataQueryTemplates','xml');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/DatabaseQuery','DataQueryTemplates','xml');
 }
 
 sub getCustomBrowseMenus {
 	my $client = shift;
-	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/CustomBrowse','Menus','xml','template','menu','simple',1);
+	my $pluginVersion = shift;
+	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/CustomBrowse','Menus','xml','template','menu','simple',1);
 	my @filteredResult = ();
 	my $dbh = getCurrentDBH();
 	for my $playlist (@$result) {
@@ -410,16 +417,19 @@ sub getCustomBrowseMenus {
 }
 sub getCustomBrowseTemplates {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/CustomBrowse','MenuTemplates','xml');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/CustomBrowse','MenuTemplates','xml');
 }
 sub getCustomBrowseContextTemplates {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/CustomBrowse','ContextMenuTemplates','xml');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/CustomBrowse','ContextMenuTemplates','xml');
 }
 
 sub getCustomBrowseContextMenus {
 	my $client = shift;
-	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/CustomBrowse','ContextMenus','xml','template','menu','simple',1);
+	my $pluginVersion = shift;
+	my $result = Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/CustomBrowse','ContextMenus','xml','template','menu','simple',1);
 	my @filteredResult = ();
 	my $dbh = getCurrentDBH();
 	for my $playlist (@$result) {
@@ -455,7 +465,8 @@ sub getCustomBrowseContextMenus {
 }
 sub getCustomBrowseMixes {
 	my $client = shift;
-	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$PLUGINVERSION,'FileCache/CustomBrowse','Mixes','xml','mix');
+	my $pluginVersion = shift;
+	return Plugins::CustomScan::Template::Reader::getTemplates($client,'CustomScan',$pluginVersion,'PluginCache/CustomBrowse','Mixes','xml','mix');
 }
 sub getMultiLibraryTemplateData {
 	my $client = shift;
@@ -719,12 +730,12 @@ sub getAvailableTitleFormats {
 		}
 	}
 
-	my $sth = $dbh->prepare("SELECT module,attr from customscan_track_attributes group by module,attr");
+	my $sth = $dbh->prepare("SELECT attr,module from customscan_track_attributes group by attr,module");
 	my $module;
 	my $attr;
 	$sth->execute();
-	$sth->bind_col(1,\$module);
-	$sth->bind_col(2, \$attr);
+	$sth->bind_col(1,\$attr);
+	$sth->bind_col(2, \$module);
 	while($sth->fetch()) {
 		$result{uc($module)."_".uc($attr)} = "CUSTOMSCAN_".uc($module)."_".uc($attr);
 	}
@@ -772,12 +783,12 @@ sub cliGetStatus {
   	$request->addResult('count',scalar(@resultModules));
 	my $moduleno = 0;
 	for my $key (@resultModules) {
-	  	$request->addResultLoop('@modules',$moduleno,'id',$key);
-	  	$request->addResultLoop('@modules',$moduleno,'name',$modules->{$key}->{'name'});
+	  	$request->addResultLoop('module_loop',$moduleno,'id',$key);
+	  	$request->addResultLoop('module_loop',$moduleno,'name',$modules->{$key}->{'name'});
 		if(defined(Plugins::CustomScan::Scanner::isScanning($key))) {
-		  	$request->addResultLoop('@modules',$moduleno,'status',Plugins::CustomScan::Scanner::isScanning($key));
+		  	$request->addResultLoop('module_loop',$moduleno,'status',Plugins::CustomScan::Scanner::isScanning($key));
 		}else {
-		  	$request->addResultLoop('@modules',$moduleno,'status',0);
+		  	$request->addResultLoop('module_loop',$moduleno,'status',0);
 		}
 		$moduleno++;
 	}
